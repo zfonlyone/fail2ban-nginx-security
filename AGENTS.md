@@ -25,3 +25,11 @@
   - `bash -n scripts/deploy.sh`
   - `docker compose --env-file .env config`
 - 修改后更新 `README.md` 或补充运维说明（如有行为变化）。
+
+## 安全红线（必须遵守）
+- **禁止在仓库内创建/写入/提交敏感文件**：`.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa`、`id_ed25519`、`authorized_keys`、`secrets.*`、`token.*`。
+- **禁止把真实凭据写入源码**：不得在 `docker-compose*.yml`、脚本、配置模板、文档中写入真实 Token、密码、API Key、私钥、会话字符串。
+- **禁止执行会暴露密钥的命令**：如直接输出完整环境变量或读取密钥文件内容到终端/日志。
+- **仅允许使用占位符**：示例值统一使用 `your-token-here`、`example.com` 等。
+- **运行时密钥必须放仓库外**：统一放在 `/etc/security-guard/.env` 或密钥管理系统，不得回写到源代码目录。
+- **提交前自检**：发现疑似敏感内容必须先替换为占位符，再提交。
