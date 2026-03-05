@@ -25,6 +25,7 @@ services:
       - ALERT_BAN_PER_MINUTE=${ALERT_BAN_PER_MINUTE:-60}
     volumes:
       - /etc/security-guard/ban:/etc/security-guard/ban:ro
+      - /etc/security-guard/state:/etc/security-guard/state
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /usr/local/bin/security-harden:/usr/local/bin/security-harden:ro
     healthcheck:

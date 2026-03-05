@@ -22,8 +22,9 @@ import sys
 import time
 import urllib.request
 from collections import Counter
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time as dt_time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from telegram import Update, BotCommand
 from telegram.ext import (
@@ -44,6 +45,9 @@ ALERT_BAN_PER_MINUTE = int(os.environ.get("ALERT_BAN_PER_MINUTE", "60"))
 
 # 封禁记录目录 (容器内挂载路径)
 BAN_DIR = "/etc/security-guard/ban"
+STATE_DIR = "/etc/security-guard/state"
+DAILY_STATE_FILE = Path(STATE_DIR) / "daily-summary.json"
+SCHEDULE_TZ = ZoneInfo("Asia/Shanghai")
 
 # 日志
 logging.basicConfig(
@@ -93,6 +97,27 @@ def read_ban_json(filename: str) -> list:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return []
+
+def load_last_daily_date() -> str:
+    try:
+        if DAILY_STATE_FILE.exists():
+            data = json.loads(DAILY_STATE_FILE.read_text(encoding="utf-8"))
+            return str(data.get("last_daily_date", ""))
+    except Exception as e:
+        log.warning(f"读取日报状态失败: {e}")
+    return ""
+
+
+def save_last_daily_date(date_text: str) -> None:
+    try:
+        Path(STATE_DIR).mkdir(parents=True, exist_ok=True)
+        DAILY_STATE_FILE.write_text(
+            json.dumps({"last_daily_date": date_text, "updated_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        log.warning(f"保存日报状态失败: {e}")
+
 
 def query_ip_info(ips: list) -> dict:
     """批量查询 IP 地理位置和 ASN 信息 (ip-api.com batch API)"""
@@ -571,15 +596,25 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def scheduled_daily_summary(ctx: ContextTypes.DEFAULT_TYPE):
-    """定时发送每日摘要"""
+    """定时发送每日摘要（带幂等与补偿）"""
     if not TG_CHAT_ID:
         return
-    msg = await build_daily_summary()
-    kwargs = {"chat_id": int(TG_CHAT_ID), "text": msg, "parse_mode": "Markdown"}
-    if TG_TOPIC_ID:
-        kwargs["message_thread_id"] = int(TG_TOPIC_ID)
-    await ctx.bot.send_message(**kwargs)
-    log.info("每日安全摘要已发送")
+
+    today = datetime.now(SCHEDULE_TZ).date().isoformat()
+    if load_last_daily_date() == today:
+        log.info("每日安全摘要已发送过，跳过重复发送")
+        return
+
+    try:
+        msg = await build_daily_summary()
+        kwargs = {"chat_id": int(TG_CHAT_ID), "text": msg, "parse_mode": "Markdown"}
+        if TG_TOPIC_ID:
+            kwargs["message_thread_id"] = int(TG_TOPIC_ID)
+        await ctx.bot.send_message(**kwargs)
+        save_last_daily_date(today)
+        log.info("每日安全摘要已发送")
+    except Exception as e:
+        log.exception(f"发送每日安全摘要失败: {e}")
 
 
 async def scheduled_anomaly_check(ctx: ContextTypes.DEFAULT_TYPE):
@@ -678,11 +713,12 @@ def main():
     # 定时任务
     job_queue = app.job_queue
     if TG_CHAT_ID:
-        # 每天 08:00 (UTC+8 = 00:00 UTC) 发送每日安全摘要
+        # 每天 08:00 CST 发送每日安全摘要（显式时区+misfire容错）
         job_queue.run_daily(
             scheduled_daily_summary,
-            time=datetime.strptime("00:00", "%H:%M").time(),
+            time=dt_time(hour=8, minute=0, tzinfo=SCHEDULE_TZ),
             name="daily_security_summary",
+            job_kwargs={"misfire_grace_time": 21600, "coalesce": True, "max_instances": 1},
         )
         # 每 5 分钟异常检测
         job_queue.run_repeating(
@@ -690,8 +726,18 @@ def main():
             interval=300,
             first=60,
             name="security_anomaly_check",
+            job_kwargs={"misfire_grace_time": 120, "coalesce": True, "max_instances": 1},
         )
         log.info("定时任务已注册: 每日安全摘要(08:00 CST) + 异常检测(5min)")
+
+        # 启动补偿: 若今日未发日报则补发一次
+        try:
+            today = datetime.now(SCHEDULE_TZ).date().isoformat()
+            if load_last_daily_date() != today:
+                job_queue.run_once(scheduled_daily_summary, when=5, name="daily_security_summary_catchup")
+                log.info("检测到今日未发日报，已触发启动补发")
+        except Exception as e:
+            log.warning(f"启动补发失败: {e}")
 
     log.info("Bot 已就绪，开始轮询...")
     app.run_polling(drop_pending_updates=True)
