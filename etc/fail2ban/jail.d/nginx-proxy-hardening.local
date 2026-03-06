@@ -1,0 +1,119 @@
+# Nginx reverse-proxy web services hardening
+# sync target: /etc/fail2ban/jail.d/nginx-proxy-hardening.local
+
+[nginx-proxy-badreq-all]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-bad-request
+logpath  = /var/log/nginx/*access.log
+findtime = 600
+maxretry = 8
+bantime  = 30d
+
+[nginx-proxy-cc-all]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-cc
+logpath  = /var/log/nginx/*access.log
+findtime = 300
+maxretry = 80
+bantime  = 30d
+
+[nginx-proxy-openlist2strm-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/openlist2strm.181028.xyz-access.log
+findtime = 600
+maxretry = 6
+bantime  = 30d
+
+[nginx-proxy-tg-export-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/tg-export.181028.xyz-access.log
+findtime = 600
+maxretry = 6
+bantime  = 30d
+
+[nginx-proxy-openlist-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/openlist.181028.xyz-access.log
+findtime = 600
+maxretry = 6
+bantime  = 30d
+
+[nginx-proxy-emby-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/emby.181028.xyz-access.log
+findtime = 600
+maxretry = 6
+bantime  = 30d
+
+[nginx-proxy-clouddrive-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/clouddrive.181028.xyz-access.log
+findtime = 600
+maxretry = 6
+bantime  = 30d
+
+[nginx-proxy-komari-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/komari.181028.xyz-access.log
+findtime = 600
+maxretry = 6
+bantime  = 30d
+
+[nginx-proxy-idc-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/idc.181028.xyz-access.log
+findtime = 600
+maxretry = 6
+bantime  = 30d
+
+[nginx-proxy-auto-register-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/access.log
+findtime = 600
+maxretry = 8
+bantime  = 30d
+
+[nginx-proxy-cpa-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/access.log
+findtime = 600
+maxretry = 8
+bantime  = 30d
+
+[nginx-proxy-grok2api-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/access.log
+findtime = 600
+maxretry = 8
+bantime  = 30d
+
+[nginx-proxy-newapi-auth]
+enabled  = true
+port     = 80,443,2096
+filter   = nginx-service-auth
+logpath  = /var/log/nginx/access.log
+findtime = 600
+maxretry = 8
+bantime  = 30d
