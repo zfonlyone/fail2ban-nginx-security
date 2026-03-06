@@ -707,6 +707,24 @@ cmd_ban_auto() {
 # ════════════════════════════════════════════════════════════
 cmd_unban() {
     local ip="$1"
+    local was_auto=0
+    local was_manual=0
+    local removed_blacklist=0
+
+    if jq -e --arg ip "$ip" '.[] | select(.ip == $ip)' "$AUTO_BAN_FILE" &>/dev/null; then
+        was_auto=1
+    fi
+    if jq -e --arg ip "$ip" '.[] | select(.ip == $ip)' "$MANUAL_BAN_FILE" &>/dev/null; then
+        was_manual=1
+    fi
+    if grep -qFx "$ip" "$BLACKLIST_TXT" 2>/dev/null; then
+        removed_blacklist=1
+    fi
+
+    if [ "$was_auto" -eq 0 ] && [ "$was_manual" -eq 0 ] && [ "$removed_blacklist" -eq 0 ]; then
+        warn "IP 未处于封禁列表: ${ip}"
+        return 0
+    fi
 
     # Fail2Ban 解禁 (由 fail2ban action 调用时跳过，避免递归/超时)
     if [ "${SECURITY_HARDEN_FROM_F2B:-0}" != "1" ]; then

@@ -136,6 +136,24 @@ def find_latest_ban_entry(ip: str):
     return records[0] if records else None
 
 
+def format_ban_reason(entry: dict) -> str:
+    """格式化封禁原因，避免空字符串影响展示"""
+    reason = str((entry or {}).get("reason", "")).strip()
+    return reason or "未记录原因"
+
+
+def format_ban_extra(entry: dict) -> str:
+    """格式化端口/路径附加信息"""
+    port = str((entry or {}).get("port", "")).strip()
+    path = str((entry or {}).get("path", "")).strip()
+    parts = []
+    if port:
+        parts.append(f"端口:{port}")
+    if path:
+        parts.append(f"路径:{path[:30]}")
+    return " | ".join(parts)
+
+
 def get_recent_ban_count_24h() -> int:
     """优先用 fail2ban 日志统计 24h 新封禁，避免列表迁移导致重复计数。"""
     out = run_host_cmd("journalctl -u fail2ban --since '24 hours ago' --no-pager 2>/dev/null | grep -c ' Ban '")
@@ -362,8 +380,27 @@ async def cmd_unban(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("用法: /unban `IP`", parse_mode="Markdown")
         return
     ip = args[0]
+    latest_entry = find_latest_ban_entry(ip)
+    if not latest_entry:
+        await update.message.reply_text(
+            f"ℹ️ IP `{ip}` 当前未在封禁列表中，无需解封。",
+            parse_mode="Markdown",
+        )
+        return
+
     result = run_host_cmd(f"security-harden unban {ip}")
-    await update.message.reply_text(f"🔓 解封结果:\n```\n{result}\n```", parse_mode="Markdown")
+    reason = format_ban_reason(latest_entry)
+    btype = latest_entry.get("_type", "未知")
+    banned_at = format_short_dt(latest_entry.get("banned_at", ""))
+    extra = format_ban_extra(latest_entry)
+    details = f"类型: {btype} | 原因: {reason} | 时间: {banned_at}"
+    if extra:
+        details += f" | {extra}"
+
+    await update.message.reply_text(
+        f"🔓 解封结果:\n```\n{result}\n```\n📌 原封禁信息: {details}",
+        parse_mode="Markdown",
+    )
 
 async def cmd_ban_asn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -403,30 +440,37 @@ async def cmd_banned(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 	msg += f"*手动封禁 (永久): {len(manual_bans)}*\n"
 	for b in manual_bans[:10]:
 		ip = b.get('ip', '')
-		reason = b.get('reason', '')
-		port = b.get('port', '')
-		path = b.get('path', '')
-		extra = f":{port}" if port else ""
-		extra += f" {path[:15]}" if path else ""
-		msg += f" `{ip}`{extra} | {format_short_dt(b.get('banned_at',''))} | {reason}\n"
+		reason = format_ban_reason(b)
+		extra = format_ban_extra(b)
+		line = f" • `{ip}` | {format_short_dt(b.get('banned_at',''))} | 原因: {reason}"
+		if extra:
+			line += f" | {extra}"
+		msg += line + "\n"
 	if len(manual_bans) > 10:
 		msg += f" _... 还有 {len(manual_bans)-10} 条_\n"
+	elif not manual_bans:
+		msg += " _暂无手动封禁 IP_\n"
 
 	msg += f"\n*自动封禁 (30天): {len(auto_bans)}*\n"
 	for b in auto_bans[:10]:
 		ip = b.get('ip', '')
-		reason = b.get('reason', '')
-		port = b.get('port', '')
-		path = b.get('path', '')
-		extra = f":{port}" if port else ""
-		extra += f" {path[:15]}" if path else ""
-		msg += f" `{ip}`{extra} | {format_short_dt(b.get('banned_at',''))} | {reason}\n"
+		reason = format_ban_reason(b)
+		extra = format_ban_extra(b)
+		line = f" • `{ip}` | {format_short_dt(b.get('banned_at',''))} | 原因: {reason}"
+		if extra:
+			line += f" | {extra}"
+		msg += line + "\n"
 	if len(auto_bans) > 10:
 		msg += f" _... 还有 {len(auto_bans)-10} 条_\n"
+	elif not auto_bans:
+		msg += " _暂无自动封禁 IP_\n"
 
 	msg += f"\n*ASN 封禁: {len(asn_bans)}*\n"
 	for b in asn_bans[:10]:
-		msg += f" AS`{b.get('asn','')}` | {b.get('prefix_count',0)} 个前缀 | {b.get('reason','')}\n"
+		reason = format_ban_reason(b)
+		msg += f" • AS`{b.get('asn','')}` | {b.get('prefix_count',0)} 个前缀 | 原因: {reason}\n"
+	if not asn_bans:
+		msg += " _暂无 ASN 封禁_\n"
 
 	if len(msg) > 4000:
 		msg = msg[:4000] + "\n... (已截断)"

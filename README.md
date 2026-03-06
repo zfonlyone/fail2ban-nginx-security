@@ -129,10 +129,10 @@ security-harden logs               # 安全日志
 |------|------|
 | `/status` | 系统安全状态 (磁盘/内存/封禁) |
 | `/ban IP` | 手动封禁 IP |
-| `/unban IP` | 解封 IP |
+| `/unban IP` | 解封 IP（若该 IP 当前未封禁，会返回无需解封提示） |
 | `/ban_asn ASN` | 封禁 ASN |
 | `/unban_asn ASN` | 解封 ASN |
-| `/banned` | 封禁列表 |
+| `/banned` | 封禁列表（显示 IP / 时间 / 封禁原因） |
 | `/export_banned` | 导出封禁列表文件 |
 | `/security` | 安全详情 |
 | `/summary` | 每日综合摘要 |
