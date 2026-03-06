@@ -135,6 +135,30 @@ def find_latest_ban_entry(ip: str):
     records.sort(key=_k, reverse=True)
     return records[0] if records else None
 
+
+def get_recent_ban_count_24h() -> int:
+    """优先用 fail2ban 日志统计 24h 新封禁，避免列表迁移导致重复计数。"""
+    out = run_host_cmd("journalctl -u fail2ban --since '24 hours ago' --no-pager 2>/dev/null | grep -c ' Ban '")
+    try:
+        return max(0, int(str(out).strip().splitlines()[-1]))
+    except Exception:
+        # 回退: 用 JSON，排除迁移记录
+        auto_bans = read_ban_json("auto-banned.json")
+        now_ts = datetime.now(timezone.utc)
+        yesterday = now_ts - timedelta(hours=24)
+        cnt = 0
+        for b in auto_bans:
+            reason = str(b.get("reason", ""))
+            if reason.startswith("migrated-"):
+                continue
+            try:
+                ban_time = datetime.fromisoformat(b.get("banned_at", "").replace("Z", "+00:00"))
+                if ban_time > yesterday:
+                    cnt += 1
+            except (ValueError, TypeError):
+                pass
+        return cnt
+
 def load_last_daily_date() -> str:
     try:
         if DAILY_STATE_FILE.exists():
@@ -422,17 +446,8 @@ async def cmd_security(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     manual_bans = read_ban_json("manual-banned.json")
     asn_bans = read_ban_json("asn-banned.json")
 
-    # 24h 内新增
-    now_ts = datetime.now(timezone.utc)
-    yesterday = now_ts - timedelta(hours=24)
-    recent_count = 0
-    for b in auto_bans:
-        try:
-            ban_time = datetime.fromisoformat(b.get("banned_at", "").replace("Z", "+00:00"))
-            if ban_time > yesterday:
-                recent_count += 1
-        except (ValueError, TypeError):
-            pass
+    # 24h 内新增（基于 fail2ban 日志）
+    recent_count = get_recent_ban_count_24h()
 
     msg += f"*封禁统计:*\n"
     msg += f"  • 自动封禁: `{len(auto_bans)}`\n"
