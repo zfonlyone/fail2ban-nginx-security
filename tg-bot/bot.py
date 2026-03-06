@@ -98,6 +98,43 @@ def read_ban_json(filename: str) -> list:
     except (FileNotFoundError, json.JSONDecodeError):
         return []
 
+
+def format_short_dt(raw: str) -> str:
+    """格式化时间: MM-DD HH:MM (24小时制)"""
+    if not raw:
+        return "?"
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        local_dt = dt.astimezone(SCHEDULE_TZ)
+        return local_dt.strftime("%m-%d %H:%M")
+    except Exception:
+        text = str(raw)
+        return text[:16] if len(text) >= 16 else text
+
+
+def find_latest_ban_entry(ip: str):
+    """在手动/自动封禁中查找某 IP 最新封禁记录"""
+    records = []
+    for b in read_ban_json("manual-banned.json"):
+        if b.get("ip") == ip:
+            b = dict(b)
+            b["_type"] = "手动"
+            records.append(b)
+    for b in read_ban_json("auto-banned.json"):
+        if b.get("ip") == ip:
+            b = dict(b)
+            b["_type"] = "自动"
+            records.append(b)
+
+    def _k(x):
+        try:
+            return datetime.fromisoformat(x.get("banned_at", "1970-01-01").replace("Z", "+00:00"))
+        except Exception:
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+    records.sort(key=_k, reverse=True)
+    return records[0] if records else None
+
 def load_last_daily_date() -> str:
     try:
         if DAILY_STATE_FILE.exists():
@@ -247,10 +284,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 			city = info.get("city", "")
 			if city:
 				loc = f"{loc}/{city}"
-			# 时间只显示日期
-			ban_time = b.get("banned_at", "?")
-			if len(ban_time) > 10:
-				ban_time = ban_time[:10]
+			ban_time = format_short_dt(b.get("banned_at", ""))
 			extra = ""
 			if port:
 				extra += f":{port}"
@@ -350,7 +384,7 @@ async def cmd_banned(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 		path = b.get('path', '')
 		extra = f":{port}" if port else ""
 		extra += f" {path[:15]}" if path else ""
-		msg += f" `{ip}`{extra} | {b.get('banned_at','')[:10]} | {reason}\n"
+		msg += f" `{ip}`{extra} | {format_short_dt(b.get('banned_at',''))} | {reason}\n"
 	if len(manual_bans) > 10:
 		msg += f" _... 还有 {len(manual_bans)-10} 条_\n"
 
@@ -362,7 +396,7 @@ async def cmd_banned(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 		path = b.get('path', '')
 		extra = f":{port}" if port else ""
 		extra += f" {path[:15]}" if path else ""
-		msg += f" `{ip}`{extra} | {b.get('banned_at','')[:10]} | {reason}\n"
+		msg += f" `{ip}`{extra} | {format_short_dt(b.get('banned_at',''))} | {reason}\n"
 	if len(auto_bans) > 10:
 		msg += f" _... 还有 {len(auto_bans)-10} 条_\n"
 
@@ -699,6 +733,7 @@ def main():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("ban", cmd_ban))
     app.add_handler(CommandHandler("unban", cmd_unban))
+    app.add_handler(CommandHandler("uban", cmd_unban))
     app.add_handler(CommandHandler("ban_asn", cmd_ban_asn))
     app.add_handler(CommandHandler("unban_asn", cmd_unban_asn))
     app.add_handler(CommandHandler("banned", cmd_banned))
