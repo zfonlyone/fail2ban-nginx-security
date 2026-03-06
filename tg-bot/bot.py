@@ -234,9 +234,9 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/security — 安全详情\n"
         "/summary — 每日综合摘要\n"
         "/logs <code>服务名</code> — 查看日志\n"
-        "/run — 运行 Security Bot\n"
-        "/stop — 停止 Security Bot\n"
-        "/restart — 重启 Security Bot\n"
+        "/run — 启动/拉起 Security 全部服务\n"
+        "/stop — 停止 Security 全部服务\n"
+        "/restart — 重启 Security 全部服务\n"
         "/help — 显示帮助",
         parse_mode="HTML",
     )
@@ -491,21 +491,21 @@ async def cmd_start_bot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """运行 Security Bot"""
     if not is_admin(update.effective_user.id):
         return
-    result = run_host_cmd("cd /etc/security-guard && docker compose up -d")
+    result = run_host_cmd("systemctl restart security-guard-compose.service && systemctl restart fail2ban.service && systemctl start security-guard-healthcheck.timer")
     await update.message.reply_text(f"▶️ 运行 Security Bot:\n```\n{result}\n```", parse_mode="Markdown")
 
 async def cmd_stop_bot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """停止 Security Bot"""
     if not is_admin(update.effective_user.id):
         return
-    result = run_host_cmd("cd /etc/security-guard && docker compose down")
+    result = run_host_cmd("systemctl stop security-guard-healthcheck.timer && systemctl stop security-guard-compose.service && systemctl stop fail2ban.service")
     await update.message.reply_text(f"⏹️ 停止 Security Bot:\n```\n{result}\n```", parse_mode="Markdown")
 
 async def cmd_restart_bot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """重启 Security Bot"""
     if not is_admin(update.effective_user.id):
         return
-    result = run_host_cmd("cd /etc/security-guard && docker compose down && docker compose up -d")
+    result = run_host_cmd("systemctl restart security-guard-compose.service && systemctl restart fail2ban.service && systemctl restart security-guard-healthcheck.timer")
     await update.message.reply_text(f"🔄 重启 Security Bot:\n```\n{result}\n```", parse_mode="Markdown")
 
 async def cmd_export_banned(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

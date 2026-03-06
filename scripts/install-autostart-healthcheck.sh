@@ -52,7 +52,8 @@ Description=Run Security Guard health check every 1 minute
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=1min
+OnCalendar=*:0/1
+AccuracySec=10s
 Unit=${UNIT_PREFIX}-healthcheck.service
 Persistent=true
 
