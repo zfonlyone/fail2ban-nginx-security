@@ -119,6 +119,34 @@ security-harden logs               # 安全日志
 - **ASN 封禁**: 永不自动解禁
 - 定时任务: 每天 03:00 执行清理
 
+### 运行策略与性能设计
+
+为降低服务器性能消耗并避免 Fail2Ban 重启时的连锁开销，当前设计采用以下策略：
+
+- **保留 `actionban`，移除 `actionunban`**
+  - 新封禁时才调用 `security-harden ban-auto` 记录到 `auto-banned.json`
+  - Fail2Ban 停止/重启时**不再**对每个已封禁 IP 逐条调用 `security-harden unban`
+  - 这样可以显著减少 shell 进程、JSON 读写、黑名单刷新与重启耗时
+
+- **自动解封不依赖 Fail2Ban stop/restart**
+  - 自动封禁仍然写入 `expires_at`
+  - 过期解封由 `security-harden auto-unban` 定时任务负责
+  - 手动解封仍使用 `security-harden unban` / `/unban`
+
+- **重复自动封禁不重写时间戳**
+  - 同一 IP 若已存在于 `auto-banned.json`，重复封禁时保留原 `banned_at` / `expires_at`
+  - 避免 Fail2Ban 重载或重复 ban 时，把历史封禁误记成“刚刚新增”
+
+- **服务器自身公网 IP 防护**
+  - 自动封禁逻辑会跳过本机公网 IP
+  - 生成 `jail.local` 时，会自动把服务器公网 IP 写入 `ignoreip`
+
+- **高频封禁告警抑制**
+  - TG Bot 在 Fail2Ban 刚重启后的短时间内，会抑制“高频封禁警告”
+  - 避免重启后的状态同步被误判为真实攻击峰值
+
+这些设计的目标是：**以尽量少的文件读写和外部进程开销，保留真实攻击记录能力，同时降低重启抖动与误报。**
+
 ---
 
 ## Telegram Bot
