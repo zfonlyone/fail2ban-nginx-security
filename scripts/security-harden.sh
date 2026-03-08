@@ -40,6 +40,21 @@ UFW_MIGRATED_REASON="migrated-ufw-auto"                         # UFW迁移后�
 
 mkdir -p "$BAN_DIR"
 
+get_public_ipv4() {
+    local ip=""
+    for url in "https://api.ipify.org" "https://ifconfig.me/ip" "https://icanhazip.com"; do
+        ip=$(curl -4fsS --max-time 5 "$url" 2>/dev/null || true)
+        ip=$(echo "$ip" | tr -d '\r\n[:space:]')
+        if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "$ip"
+            return 0
+        fi
+    done
+    return 1
+}
+
+SELF_PUBLIC_IP="$(get_public_ipv4 || true)"
+
 # ── 初始化 JSON 文件 ──
 init_json() {
     local f="$1"
@@ -298,7 +313,7 @@ FILTER3
 # ── 核心 Jail 配置 (SSH + Nginx, 始终启用) ──
 cat > /etc/fail2ban/jail.local <<JAIL_EOF
 [DEFAULT]
-ignoreip = 127.0.0.1/8 192.168.0.0/16 10.0.0.0/8 ::1/128 fe80::/10 fc00::/7
+ignoreip = 127.0.0.1/8 192.168.0.0/16 10.0.0.0/8 ::1/128 fe80::/10 fc00::/7 ${SELF_PUBLIC_IP}
 bantime = 30d
 findtime = 15m
 maxretry = 10
@@ -661,6 +676,11 @@ cmd_ban_auto() {
 	local ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 	local expire=$(date -u -d "+${AUTO_UNBAN_DAYS} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
 		date -u -v+${AUTO_UNBAN_DAYS}d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+
+	if [ -n "${SELF_PUBLIC_IP:-}" ] && [ "$ip" = "$SELF_PUBLIC_IP" ]; then
+		warn "跳过自动封禁本机公网 IP: ${ip} (原因: ${reason})"
+		return 0
+	fi
 
 	# 加锁处理手动检查+自动写入，避免并发覆盖
 	ban_lock_acquire
