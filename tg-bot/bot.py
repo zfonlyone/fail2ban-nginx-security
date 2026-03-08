@@ -136,6 +136,15 @@ def find_latest_ban_entry(ip: str):
     return records[0] if records else None
 
 
+def is_ip_currently_banned(ip: str) -> bool:
+    """检查 IP 当前是否仍在封禁列表中，而不是仅仅历史上被封过。"""
+    for filename in ("manual-banned.json", "auto-banned.json"):
+        for b in read_ban_json(filename):
+            if b.get("ip") == ip:
+                return True
+    return False
+
+
 def format_ban_reason(entry: dict) -> str:
     """格式化封禁原因，避免空字符串影响展示"""
     reason = str((entry or {}).get("reason", "")).strip()
@@ -380,19 +389,19 @@ async def cmd_unban(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("用法: /unban `IP`", parse_mode="Markdown")
         return
     ip = args[0]
-    latest_entry = find_latest_ban_entry(ip)
-    if not latest_entry:
+    if not is_ip_currently_banned(ip):
         await update.message.reply_text(
             f"ℹ️ IP `{ip}` 当前未在封禁列表中，无需解封。",
             parse_mode="Markdown",
         )
         return
 
+    latest_entry = find_latest_ban_entry(ip)
     result = run_host_cmd(f"security-harden unban {ip}")
     reason = format_ban_reason(latest_entry)
-    btype = latest_entry.get("_type", "未知")
-    banned_at = format_short_dt(latest_entry.get("banned_at", ""))
-    extra = format_ban_extra(latest_entry)
+    btype = latest_entry.get("_type", "未知") if latest_entry else "未知"
+    banned_at = format_short_dt(latest_entry.get("banned_at", "")) if latest_entry else "?"
+    extra = format_ban_extra(latest_entry) if latest_entry else ""
     details = f"类型: {btype} | 原因: {reason} | 时间: {banned_at}"
     if extra:
         details += f" | {extra}"
