@@ -37,6 +37,7 @@ BANACTION_DEFAULT="${SECURITY_BANACTION:-iptables-multiport}"  # 默认不依赖
 FAIL2BAN_BLOCKTYPE="${SECURITY_FAIL2BAN_BLOCKTYPE:-DROP}"      # Fail2Ban 动作: DROP
 IPTABLES_BLOCK_TARGET="${SECURITY_IPTABLES_TARGET:-DROP}"       # ipset 规则动作: DROP
 UFW_MIGRATED_REASON="migrated-ufw-auto"                         # UFW迁移后的自动封禁原因
+SELF_PUBLIC_IP_CACHE_FILE="/run/security-guard-self-public-ip.cache"
 
 mkdir -p "$BAN_DIR"
 
@@ -53,7 +54,24 @@ get_public_ipv4() {
     return 1
 }
 
-SELF_PUBLIC_IP="$(get_public_ipv4 || true)"
+get_self_public_ip() {
+    local ip=""
+    if [ -f "$SELF_PUBLIC_IP_CACHE_FILE" ]; then
+        ip=$(tr -d '\r\n[:space:]' < "$SELF_PUBLIC_IP_CACHE_FILE" 2>/dev/null || true)
+        if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "$ip"
+            return 0
+        fi
+    fi
+
+    ip=$(get_public_ipv4 || true)
+    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo "$ip" > "$SELF_PUBLIC_IP_CACHE_FILE" 2>/dev/null || true
+        echo "$ip"
+        return 0
+    fi
+    return 1
+}
 
 # ── 初始化 JSON 文件 ──
 init_json() {
@@ -310,10 +328,13 @@ FILTER3
 
     [ -f /etc/fail2ban/jail.local ] && cp /etc/fail2ban/jail.local "/etc/fail2ban/jail.local.bak.$(date +%s)"
 
+    local self_public_ip=""
+    self_public_ip="$(get_self_public_ip || true)"
+
 # ── 核心 Jail 配置 (SSH + Nginx, 始终启用) ──
 cat > /etc/fail2ban/jail.local <<JAIL_EOF
 [DEFAULT]
-ignoreip = 127.0.0.1/8 192.168.0.0/16 10.0.0.0/8 ::1/128 fe80::/10 fc00::/7 ${SELF_PUBLIC_IP}
+ignoreip = 127.0.0.1/8 192.168.0.0/16 10.0.0.0/8 ::1/128 fe80::/10 fc00::/7 ${self_public_ip}
 bantime = 30d
 findtime = 15m
 maxretry = 10
@@ -677,7 +698,9 @@ cmd_ban_auto() {
 	local expire=$(date -u -d "+${AUTO_UNBAN_DAYS} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
 		date -u -v+${AUTO_UNBAN_DAYS}d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
 
-	if [ -n "${SELF_PUBLIC_IP:-}" ] && [ "$ip" = "$SELF_PUBLIC_IP" ]; then
+	local self_public_ip=""
+	self_public_ip="$(get_self_public_ip || true)"
+	if [ -n "${self_public_ip:-}" ] && [ "$ip" = "$self_public_ip" ]; then
 		warn "跳过自动封禁本机公网 IP: ${ip} (原因: ${reason})"
 		return 0
 	fi
@@ -777,7 +800,9 @@ cmd_unban() {
     ban_lock_release
 
     # 刷新 Nginx 黑名单（带节流，避免高频封禁造成 CPU 风暴）
-    trigger_blacklist_refresh
+    if [ "${SECURITY_HARDEN_FROM_F2B:-0}" != "1" ]; then
+        trigger_blacklist_refresh
+    fi
 
     log "已解封: ${ip}"
 }
