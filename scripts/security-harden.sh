@@ -708,8 +708,15 @@ cmd_ban_auto() {
 	fi
 
 	# 记录到自动封禁文件
-	local existing
+	local existing existing_entry existing_ts existing_exp
+	existing_entry=$(jq -c --arg ip "$ip" '.[] | select(.ip == $ip) | . ' "$AUTO_BAN_FILE" 2>/dev/null | head -n 1 || true)
 	existing=$(jq --arg ip "$ip" '[.[] | select(.ip != $ip)]' "$AUTO_BAN_FILE")
+	if [ -n "$existing_entry" ]; then
+		existing_ts=$(echo "$existing_entry" | jq -r '.banned_at // empty')
+		existing_exp=$(echo "$existing_entry" | jq -r '.expires_at // empty')
+		[ -n "$existing_ts" ] && ts="$existing_ts"
+		[ -n "$existing_exp" ] && expire="$existing_exp"
+	fi
 	echo "$existing" | jq --arg ip "$ip" --arg ts "$ts" --arg r "$reason" --arg exp "$expire" \
 		--arg port "$port" --arg path "$path" \
 		'. + [{"ip":$ip,"banned_at":$ts,"expires_at":$exp,"reason":$r,"port":$port,"path":$path,"permanent":false}]' > "${AUTO_BAN_FILE}.tmp" \
