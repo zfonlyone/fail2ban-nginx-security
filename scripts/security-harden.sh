@@ -424,7 +424,7 @@ OPTIONAL_EOF
 [Definition]
 actionstart =
 actionban = SECURITY_HARDEN_FROM_F2B=1 /usr/local/bin/security-harden ban-auto <ip> <name>
-actionunban = SECURITY_HARDEN_FROM_F2B=1 /usr/local/bin/security-harden unban <ip>
+actionunban =
 ACTION_EOF
 
     log "Fail2Ban action 已配置"
