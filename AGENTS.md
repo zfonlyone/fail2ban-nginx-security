@@ -5,10 +5,21 @@
 - 以最小改动保障可维护性和可回滚性。
 
 ## 部署规范
+- 源代码目录：`/root/code/fail2ban-nginx-security`
+- 生产目录：`/etc/security-guard`
 - 部署入口为 `scripts/deploy.sh`。
 - 部署脚本必须自动将源码同步到 `/etc/security-guard`（至少包含 `docker-compose.yml`、`tg-bot/`、`scripts/`）。
 - 复制目录时必须使用递归同步方式，不允许对目录使用单文件 `cp -f`。
 - 同步时应过滤运行时缓存：`__pycache__/`、`*.pyc`、`*.pyo`。
+- 不要默认源码仓库改动已经上线，必须以 `/etc/security-guard` 中的实际服务状态为准。
+
+## 修改后验证（必须）
+- 每次部署后至少执行：
+  - `docker compose --env-file /etc/security-guard/.env -f /etc/security-guard/docker-compose.yml ps`
+  - `docker inspect <container>` 查看 `StartedAt` / image id
+  - 本机关键命令或端口检查
+  - 如服务对外可见，再补公网验证
+- 如果本机已更新、公网仍异常，再检查反向代理/缓存，而不是先假设源码没生效。
 
 ## Shell 规范
 - 必须启用严格模式：`set -euo pipefail`。

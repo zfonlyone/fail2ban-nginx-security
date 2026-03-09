@@ -32,6 +32,39 @@
 
 ## 快速部署
 
+### 开发仓库 vs 生产目录（重要）
+
+如果你是在这台机器上直接维护本项目，请区分：
+
+- **开发仓库**：`/root/code/fail2ban-nginx-security`
+- **生产目录**：`/etc/security-guard`
+
+也就是说，修改源码仓库后，必须通过部署脚本同步到 `/etc/security-guard`，再以生产目录中的实际状态为准。
+
+### 推荐更新/验证流程
+
+```bash
+# 1) 修改源码
+cd /root/code/fail2ban-nginx-security
+
+# 2) 先做基本校验
+bash -n scripts/deploy.sh
+docker compose --env-file .env config
+
+# 3) 提交代码
+git add .
+git commit -m "your change"
+
+# 4) 执行部署脚本
+sudo bash scripts/deploy.sh
+
+# 5) 验证生产环境是否真的更新
+docker compose --env-file /etc/security-guard/.env -f /etc/security-guard/docker-compose.yml ps
+docker inspect security-bot
+```
+
+## 快速部署
+
 ```bash
 # 1. 进入安全模块目录
 cd security/
