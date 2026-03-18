@@ -21,6 +21,7 @@ mapfile -t running_services < <(docker compose ps --status running --services 2>
 mapfile -t exited_services < <(docker compose ps --status exited --services 2>/dev/null || true)
 
 for svc in "${exited_services[@]}"; do
+  [ -n "${svc}" ] || continue
   log "service exited: $svc -> restart"
   docker compose restart "$svc" >/dev/null 2>&1 || docker compose up -d "$svc" >/dev/null 2>&1 || true
 done

@@ -14,6 +14,8 @@ else
 fi
 BASE_DIR="/etc/security-guard"
 ENV_FILE="${BASE_DIR}/.env"
+ENV_TEMPLATE="${PROJECT_DIR}/.env.example"
+IMAGE_NAME="security-guard-bot:latest"
 
 # ── 颜色 ──
 GREEN='\033[0;32m'
@@ -50,6 +52,133 @@ sync_tree() {
     fi
 }
 
+sync_runtime_scripts() {
+    local src="${PROJECT_DIR}/scripts"
+    local dst="${BASE_DIR}/scripts"
+
+    [ -d "$src" ] || return 0
+    mkdir -p "$dst"
+
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --delete \
+            --exclude "deploy.sh" \
+            --exclude "__pycache__/" \
+            --exclude "*.pyc" \
+            --exclude "*.pyo" \
+            "${src}/" "${dst}/"
+    else
+        cp -a "${src}/." "${dst}/"
+        rm -f "${dst}/deploy.sh"
+        find "$dst" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+        find "$dst" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete 2>/dev/null || true
+    fi
+}
+
+read_env_key() {
+    local file="$1"
+    local key="$2"
+    [ -f "$file" ] || return 0
+    awk -F= -v k="$key" '$1==k {sub(/^[^=]*=/, ""); print; exit}' "$file"
+}
+
+upsert_env_key() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+    if grep -q "^${key}=" "$file"; then
+        local escaped
+        escaped=$(printf '%s' "$value" | sed 's/[\/&]/\\&/g')
+        sed -i "s/^${key}=.*/${key}=${escaped}/" "$file"
+    else
+        echo "${key}=${value}" >> "$file"
+    fi
+}
+
+sync_template_keys_from_env() {
+    local template="$1"
+    local env_file="$2"
+    [ -f "$template" ] || return 0
+    [ -f "$env_file" ] || return 0
+    while IFS='=' read -r key value; do
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        if ! grep -q "^${key}=" "$template"; then
+            echo "${key}=${value}" >> "$template"
+            log "模板追加新字段: ${key}"
+        fi
+    done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$env_file")
+}
+
+service_container_id() {
+    docker ps -q --filter "label=com.docker.compose.service=security-bot" | head -1
+}
+
+service_env_value() {
+    local key="$1"
+    local cid
+    cid="$(service_container_id)"
+    [ -n "$cid" ] || return 0
+    docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null \
+      | awk -F= -v k="$key" '$1==k {$1=""; sub(/^=/, ""); print; exit}'
+}
+
+infer_running_value() {
+    local key="$1"
+    case "$key" in
+        SEC_TG_BOT_TOKEN) service_env_value "SEC_TG_BOT_TOKEN" ;;
+        SEC_TG_CHAT_ID) service_env_value "SEC_TG_CHAT_ID" ;;
+        SEC_TG_ADMIN_IDS) service_env_value "SEC_TG_ADMIN_IDS" ;;
+        SEC_TG_TOPIC_ID) service_env_value "SEC_TG_TOPIC_ID" ;;
+        ALERT_BAN_PER_MINUTE)
+            local v
+            v="$(service_env_value "ALERT_BAN_PER_MINUTE")"
+            [ -n "$v" ] && { echo "$v"; return 0; }
+            v="$(service_env_value "ALERT_BAN_THRESHOLD")"
+            [ -n "$v" ] && { echo "$v"; return 0; }
+            read_env_key "$ENV_FILE" "ALERT_BAN_THRESHOLD"
+            ;;
+        RUN_HARDEN_ON_DEPLOY)
+            read_env_key "$ENV_FILE" "RUN_HARDEN_ON_DEPLOY"
+            ;;
+        *)
+            ;;
+    esac
+}
+
+ensure_env_key() {
+    local key="$1"
+    local fallback="${2:-}"
+    local current inferred value
+    current="$(read_env_key "$ENV_FILE" "$key")"
+    if [ -z "${current:-}" ]; then
+        inferred="$(infer_running_value "$key")"
+        value="${inferred:-$fallback}"
+        upsert_env_key "$ENV_FILE" "$key" "$value"
+        log ".env 补充字段: ${key}"
+    fi
+}
+
+build_security_bot_image() {
+    if [ ! -f "${PROJECT_DIR}/tg-bot/Dockerfile" ]; then
+        error "源码目录缺少 tg-bot/Dockerfile: ${PROJECT_DIR}/tg-bot/Dockerfile"
+        exit 1
+    fi
+
+    info "在源码目录构建 Security Bot 镜像"
+    docker build -t "${IMAGE_NAME}" "${PROJECT_DIR}/tg-bot"
+    log "镜像构建完成: ${IMAGE_NAME}"
+}
+
+clean_runtime_code() {
+    rm -rf \
+        "${BASE_DIR}/tg-bot" \
+        "${BASE_DIR}/.git" \
+        "${BASE_DIR}/README.md" \
+        "${BASE_DIR}/AGENTS.md" \
+        "${BASE_DIR}/GEMINI.md"
+}
+
 # ── 检查 Root ──
 if [ "$EUID" -ne 0 ]; then
     error "请使用 root 权限运行: sudo bash deploy.sh"
@@ -61,7 +190,7 @@ fi
 # ══════════════════════════════════════════════════════════════
 step "1/6 创建目录结构"
 
-mkdir -p "${BASE_DIR}"/{ban,scripts,tg-bot}
+mkdir -p "${BASE_DIR}"/{ban,state,scripts}
 cd "$BASE_DIR"
 log "工作目录: $BASE_DIR"
 
@@ -70,72 +199,46 @@ log "工作目录: $BASE_DIR"
 # ══════════════════════════════════════════════════════════════
 step "2/6 配置 Telegram Bot"
 
-if [ -f "$ENV_FILE" ]; then
-    log "检测到已有配置"
-    source "$ENV_FILE"
-    echo -e "  当前 Token: ${GREEN}${SEC_TG_BOT_TOKEN:-(未配置)}${NC}"
-    echo -e "  当前 Chat ID: ${GREEN}${SEC_TG_CHAT_ID:-(未配置)}${NC}"
-    echo
-    read -p "是否重新配置 TG Bot? (y/N): " reconfig
-    if [[ ! "$reconfig" =~ ^[Yy]$ ]]; then
-        log "保留已有配置"
-    else
-        unset SEC_TG_BOT_TOKEN SEC_TG_CHAT_ID SEC_TG_ADMIN_IDS
-    fi
+if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_TEMPLATE" ]; then
+    cp -f "$ENV_TEMPLATE" "$ENV_FILE"
+fi
+touch "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
+# 统一从 /etc/security-guard/.env 读取，缺失项回填运行中实例值
+ensure_env_key "SEC_TG_BOT_TOKEN" ""
+ensure_env_key "SEC_TG_CHAT_ID" ""
+SEC_TG_CHAT_ID_VAL="$(read_env_key "$ENV_FILE" "SEC_TG_CHAT_ID")"
+ensure_env_key "SEC_TG_ADMIN_IDS" "${SEC_TG_CHAT_ID_VAL}"
+ensure_env_key "SEC_TG_TOPIC_ID" ""
+ensure_env_key "ALERT_BAN_PER_MINUTE" "60"
+ensure_env_key "RUN_HARDEN_ON_DEPLOY" "false"
+
+if [ -n "$(read_env_key "$ENV_FILE" "ALERT_BAN_THRESHOLD")" ] && [ "$(read_env_key "$ENV_FILE" "ALERT_BAN_PER_MINUTE")" = "60" ]; then
+    upsert_env_key "$ENV_FILE" "ALERT_BAN_PER_MINUTE" "$(read_env_key "$ENV_FILE" "ALERT_BAN_THRESHOLD")"
 fi
 
-if [ -z "${SEC_TG_BOT_TOKEN:-}" ]; then
-    info "从 @BotFather 创建 Bot 获取 Token"
-    info "从 @userinfobot 获取 Chat ID"
-    echo
-    read -p "Security Bot Token (留空可稍后配置): " SEC_TG_BOT_TOKEN
-    SEC_TG_BOT_TOKEN=${SEC_TG_BOT_TOKEN:-}
-    read -p "TG Chat ID (留空可稍后配置): " SEC_TG_CHAT_ID
-    SEC_TG_CHAT_ID=${SEC_TG_CHAT_ID:-}
-    read -p "TG Admin IDs (逗号分隔，留空同 Chat ID): " SEC_TG_ADMIN_IDS
-    SEC_TG_ADMIN_IDS=${SEC_TG_ADMIN_IDS:-${SEC_TG_CHAT_ID}}
-    read -p "群组话题 ID (可选，留空不使用话题): " SEC_TG_TOPIC_ID
-    SEC_TG_TOPIC_ID=${SEC_TG_TOPIC_ID:-}
+sync_template_keys_from_env "$ENV_TEMPLATE" "$ENV_FILE"
 
-    cat > "$ENV_FILE" <<ENVEOF
-# Security Guard 配置 (由 deploy.sh 生成)
-# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-
-# Telegram Bot (安全模块专用)
-SEC_TG_BOT_TOKEN=${SEC_TG_BOT_TOKEN}
-SEC_TG_CHAT_ID=${SEC_TG_CHAT_ID}
-SEC_TG_ADMIN_IDS=${SEC_TG_ADMIN_IDS}
-SEC_TG_TOPIC_ID=${SEC_TG_TOPIC_ID}
-
-# 告警阈值 (每分钟封禁超过此数触发告警)
-ALERT_BAN_PER_MINUTE=60
-ENVEOF
-    chmod 600 "$ENV_FILE"
-    log "配置已保存: $ENV_FILE"
-fi
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+log "当前 Token: ${SEC_TG_BOT_TOKEN:-(未配置)}"
+log "当前 Chat ID: ${SEC_TG_CHAT_ID:-(未配置)}"
 
 # ══════════════════════════════════════════════════════════════
 # 3. 部署文件
 # ══════════════════════════════════════════════════════════════
-step "3/6 部署配置文件"
+step "3/6 构建镜像并同步运行文件"
+
+build_security_bot_image
 
 if [ "$PROJECT_DIR" != "$BASE_DIR" ]; then
-    # 复制 docker-compose
     cp -f "${PROJECT_DIR}/docker-compose.yml" "${BASE_DIR}/"
-
-    # 同步源码目录到 /etc/security-guard（自动过滤 __pycache__）
-    sync_tree "${PROJECT_DIR}/tg-bot" "${BASE_DIR}/tg-bot"
-    sync_tree "${PROJECT_DIR}/scripts" "${BASE_DIR}/scripts"
-    log "源码已同步到 ${BASE_DIR} (tg-bot/, scripts/, docker-compose.yml)"
+    sync_runtime_scripts
+    log "运行文件已同步到 ${BASE_DIR} (docker-compose.yml, scripts/)"
 fi
 
-# 验证关键文件
-if [ ! -f "${BASE_DIR}/tg-bot/Dockerfile" ]; then
-    error "tg-bot/Dockerfile 缺失！请检查项目文件完整性"
-    error "期望位置: ${BASE_DIR}/tg-bot/Dockerfile"
-    ls -la "${BASE_DIR}/tg-bot/" 2>/dev/null || true
-fi
-
+clean_runtime_code
 log "配置文件部署完成"
 
 # ══════════════════════════════════════════════════════════════
@@ -413,12 +516,11 @@ log "'sg' 管理工具已安装"
 step "6/6 启动服务"
 
 # 安全加固
-echo -e "${YELLOW}是否现在运行安全加固？(Y/n)${NC}"
-read -p "> " run_harden
-if [[ ! "$run_harden" =~ ^[Nn]$ ]]; then
+RUN_HARDEN_ON_DEPLOY="${RUN_HARDEN_ON_DEPLOY:-false}"
+if [[ "${RUN_HARDEN_ON_DEPLOY,,}" =~ ^(1|y|yes|true)$ ]]; then
     security-harden install
 else
-    info "跳过安全加固，可稍后运行: security-harden install"
+    info "根据 .env 配置跳过安全加固 (RUN_HARDEN_ON_DEPLOY=${RUN_HARDEN_ON_DEPLOY})"
 fi
 
 # 启动 TG Bot
@@ -429,7 +531,6 @@ if [ -z "${SEC_TG_BOT_TOKEN:-}" ]; then
     warn "请编辑 ${BASE_DIR}/.env 填入 Token 后运行: sg start"
 else
     if command -v docker &>/dev/null; then
-        docker compose build security-bot
         docker compose up -d
         log "Security Bot 已启动"
     else

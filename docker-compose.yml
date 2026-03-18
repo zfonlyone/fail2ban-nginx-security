@@ -8,9 +8,7 @@ services:
   # Security Bot - 安全管理 Telegram 机器人
   # ─────────────────────────────────────────────────────────
   security-bot:
-    build:
-      context: ./tg-bot
-      dockerfile: Dockerfile
+    image: security-guard-bot:latest
     container_name: security-bot
     restart: unless-stopped
     pid: "host"
@@ -30,7 +28,7 @@ services:
       - /usr/local/bin/security-harden:/usr/local/bin/security-harden:ro
     healthcheck:
       test: [ "CMD-SHELL", "ps -ef | grep -q '[p]ython .*bot.py'" ]
-      interval: 30s
+      interval: 5m
       timeout: 5s
       retries: 3
     networks:

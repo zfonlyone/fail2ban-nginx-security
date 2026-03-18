@@ -30,6 +30,14 @@
 
 ---
 
+## 架构与部署约定
+
+- **源码目录**：`/root/code/fail2ban-nginx-security`
+- **运行目录**：`/etc/security-guard`
+- `scripts/deploy.sh` 会先在源码目录构建 `security-guard-bot:latest`，再把运行所需文件同步到 `/etc/security-guard`
+- `/etc/security-guard` 只保留 `docker-compose.yml`、`.env`、`ban/`、`state/`、`scripts/`，不再保留 `tg-bot/` 源码目录
+- 不要在源码目录直接执行 `docker compose up`
+
 ## 快速部署
 
 ### 开发仓库 vs 生产目录（重要）
@@ -49,7 +57,7 @@ cd /root/code/fail2ban-nginx-security
 
 # 2) 先做基本校验
 bash -n scripts/deploy.sh
-docker compose --env-file .env config
+docker compose --env-file .env.example -f docker-compose.yml config
 
 # 3) 提交代码
 git add .
@@ -63,21 +71,22 @@ docker compose --env-file /etc/security-guard/.env -f /etc/security-guard/docker
 docker inspect security-bot
 ```
 
-## 快速部署
+### 一键部署
 
 ```bash
-# 1. 进入安全模块目录
-cd security/
+# 1. 进入源码目录
+cd /root/code/fail2ban-nginx-security
 
 # 2. 一键部署
 sudo bash scripts/deploy.sh
 ```
 
 脚本将自动：
-- ✅ 交互式配置 TG Bot Token / Chat ID
+- ✅ 在源码目录构建 `security-guard-bot:latest`
 - ✅ 安装 `security-harden` 到 `/usr/local/bin/`
 - ✅ 安装 `sg` 管理工具到 `/usr/local/bin/`
 - ✅ 创建 `/etc/security-guard/` 目录结构
+- ✅ 补齐 `/etc/security-guard/.env` 缺失字段
 - ✅ 运行安全加固 (Fail2Ban + 黑名单 + 内核优化)
 - ✅ 安装自动解禁定时任务
 - ✅ 启动安全 TG Bot (需配置 Token)
@@ -219,40 +228,37 @@ send_tg("🛡️ 安全告警: 检测到异常")
 
 ```bash
 # 命令行:
-python /etc/security-guard/tg-bot/notify.py "安全事件通知"
+python /root/code/fail2ban-nginx-security/tg-bot/notify.py "安全事件通知"
 ```
 
 ---
 
 ## 文件结构
 
-```
-security/
+```text
+/root/code/fail2ban-nginx-security/
 ├── docker-compose.yml            ← Docker 编排
-├── .env                          ← 环境变量 (TG Bot Token)
-├── .gitignore
-├── README.md                     ← 本文档
+├── .env.example                  ← 运行时环境变量模板
 ├── scripts/
-│   ├── security-harden.sh        ← 安全加固一键脚本
-│   ├── Fail2ban.sh               ← Fail2Ban 独立配置
-│   ├── nginx-ban.sh              ← Nginx 封禁脚本
-│   └── deploy.sh                 ← 部署脚本
+│   ├── security-harden.sh
+│   ├── Fail2ban.sh
+│   ├── nginx-ban.sh
+│   └── deploy.sh
 └── tg-bot/
     ├── Dockerfile
-    ├── bot.py                    ← 安全 TG Bot
-    ├── notify.py                 ← 通知工具
+    ├── bot.py
+    ├── notify.py
     └── requirements.txt
 
-# 服务器部署目录
 /etc/security-guard/
 ├── ban/
-│   ├── auto-banned.json          ← 自动封禁记录
-│   ├── manual-banned.json        ← 手动封禁记录 (永久)
-│   └── asn-banned.json           ← ASN 封禁记录
+│   ├── auto-banned.json
+│   ├── manual-banned.json
+│   └── asn-banned.json
+├── state/
 ├── docker-compose.yml
 ├── .env
-├── scripts/
-└── tg-bot/
+└── scripts/
 ```
 
 ---

@@ -8,9 +8,9 @@
 - 源代码目录：`/root/code/fail2ban-nginx-security`
 - 生产目录：`/etc/security-guard`
 - 部署入口为 `scripts/deploy.sh`。
-- 部署脚本必须自动将源码同步到 `/etc/security-guard`（至少包含 `docker-compose.yml`、`tg-bot/`、`scripts/`）。
-- 复制目录时必须使用递归同步方式，不允许对目录使用单文件 `cp -f`。
-- 同步时应过滤运行时缓存：`__pycache__/`、`*.pyc`、`*.pyo`。
+- 部署脚本必须在源码目录构建 `security-guard-bot:latest`，再同步运行文件到 `/etc/security-guard`。
+- `/etc/security-guard` 只保留 `docker-compose.yml`、`.env`、`ban/`、`state/`、`scripts/`，不得保留 `tg-bot/` 源码目录。
+- 运行目录中的运维脚本可以同步，但应用源码不能复制到 `/etc/security-guard` 后再构建。
 - 不要默认源码仓库改动已经上线，必须以 `/etc/security-guard` 中的实际服务状态为准。
 
 ## 修改后验证（必须）
@@ -34,10 +34,11 @@
 ## 变更与验证
 - 每次修改部署逻辑后至少执行：
   - `bash -n scripts/deploy.sh`
-  - `docker compose --env-file .env config`
+  - `docker compose --env-file .env.example -f docker-compose.yml config`
 - 修改后更新 `README.md` 或补充运维说明（如有行为变化）。
 
 ## 安全红线（必须遵守）
+- **不要直接修改env中的密钥和容器密钥，需要得到我的同意才可以。**
 - **禁止在仓库内创建/写入/提交敏感文件**：`.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa`、`id_ed25519`、`authorized_keys`、`secrets.*`、`token.*`。
 - **禁止把真实凭据写入源码**：不得在 `docker-compose*.yml`、脚本、配置模板、文档中写入真实 Token、密码、API Key、私钥、会话字符串。
 - **禁止执行会暴露密钥的命令**：如直接输出完整环境变量或读取密钥文件内容到终端/日志。

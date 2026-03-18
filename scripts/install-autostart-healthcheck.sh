@@ -48,11 +48,11 @@ EOF_UNIT
 
 cat > "/etc/systemd/system/${UNIT_PREFIX}-healthcheck.timer" <<EOF_UNIT
 [Unit]
-Description=Run Security Guard health check every 1 minute
+Description=Run Security Guard health check every 5 minutes
 
 [Timer]
 OnBootSec=2min
-OnCalendar=*:0/1
+OnCalendar=*:0/5
 AccuracySec=10s
 Unit=${UNIT_PREFIX}-healthcheck.service
 Persistent=true
