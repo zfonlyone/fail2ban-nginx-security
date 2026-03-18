@@ -35,7 +35,7 @@
 - **源码目录**：`/root/code/fail2ban-nginx-security`
 - **运行目录**：`/etc/security-guard`
 - `scripts/deploy.sh` 会先在源码目录构建 `security-guard-bot:latest`，再把运行所需文件同步到 `/etc/security-guard`
-- `/etc/security-guard` 只保留 `docker-compose.yml`、`.env`、`ban/`、`state/`、`scripts/`，不再保留 `tg-bot/` 源码目录
+- `/etc/security-guard` 只保留 `docker-compose.yml`、`.env`、`ban/`、`state/` 等配置/数据文件，不再保留 `scripts/`、`tg-bot/` 源码目录
 - 不要在源码目录直接执行 `docker compose up`
 
 ## 快速部署
@@ -85,7 +85,7 @@ sudo bash scripts/deploy.sh
 - ✅ 在源码目录构建 `security-guard-bot:latest`
 - ✅ 安装 `security-harden` 到 `/usr/local/bin/`
 - ✅ 安装 `sg` 管理工具到 `/usr/local/bin/`
-- ✅ 创建 `/etc/security-guard/` 目录结构
+- ✅ 创建 `/etc/security-guard/` 配置/数据目录结构
 - ✅ 补齐 `/etc/security-guard/.env` 缺失字段
 - ✅ 运行安全加固 (Fail2Ban + 黑名单 + 内核优化)
 - ✅ 安装自动解禁定时任务
@@ -257,8 +257,7 @@ python /root/code/fail2ban-nginx-security/tg-bot/notify.py "安全事件通知"
 │   └── asn-banned.json
 ├── state/
 ├── docker-compose.yml
-├── .env
-└── scripts/
+└── .env
 ```
 
 ---

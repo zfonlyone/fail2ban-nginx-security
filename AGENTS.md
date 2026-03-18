@@ -9,8 +9,8 @@
 - 生产目录：`/etc/security-guard`
 - 部署入口为 `scripts/deploy.sh`。
 - 部署脚本必须在源码目录构建 `security-guard-bot:latest`，再同步运行文件到 `/etc/security-guard`。
-- `/etc/security-guard` 只保留 `docker-compose.yml`、`.env`、`ban/`、`state/`、`scripts/`，不得保留 `tg-bot/` 源码目录。
-- 运行目录中的运维脚本可以同步，但应用源码不能复制到 `/etc/security-guard` 后再构建。
+- `/etc/security-guard` 只保留 `docker-compose.yml`、`.env`、`ban/`、`state/` 等配置/数据文件，不得保留 `scripts/`、`tg-bot/` 源码目录。
+- 运维脚本应安装到 `/usr/local/bin` 或由 systemd 直接引用源码目录脚本，不能复制到 `/etc/security-guard`。
 - 不要默认源码仓库改动已经上线，必须以 `/etc/security-guard` 中的实际服务状态为准。
 
 ## 修改后验证（必须）

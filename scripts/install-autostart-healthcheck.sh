@@ -3,7 +3,7 @@ set -euo pipefail
 
 BASE_DIR="/etc/security-guard"
 UNIT_PREFIX="security-guard"
-HEALTH_SCRIPT="${BASE_DIR}/scripts/compose-healthcheck.sh"
+HEALTH_SCRIPT="/usr/local/bin/security-guard-compose-healthcheck"
 
 if [ "${EUID}" -ne 0 ]; then
   echo "please run as root"

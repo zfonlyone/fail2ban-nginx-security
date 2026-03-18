@@ -32,48 +32,6 @@ warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 info()  { echo -e "${BLUE}[→]${NC} $1"; }
 step()  { echo -e "\n${CYAN}${BOLD}━━━ $1 ━━━${NC}\n"; }
 
-sync_tree() {
-    local src="$1"
-    local dst="$2"
-
-    [ -d "$src" ] || return 0
-    mkdir -p "$dst"
-
-    if command -v rsync >/dev/null 2>&1; then
-        rsync -a --delete \
-            --exclude "__pycache__/" \
-            --exclude "*.pyc" \
-            --exclude "*.pyo" \
-            "${src}/" "${dst}/"
-    else
-        cp -a "${src}/." "${dst}/"
-        find "$dst" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
-        find "$dst" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete 2>/dev/null || true
-    fi
-}
-
-sync_runtime_scripts() {
-    local src="${PROJECT_DIR}/scripts"
-    local dst="${BASE_DIR}/scripts"
-
-    [ -d "$src" ] || return 0
-    mkdir -p "$dst"
-
-    if command -v rsync >/dev/null 2>&1; then
-        rsync -a --delete \
-            --exclude "deploy.sh" \
-            --exclude "__pycache__/" \
-            --exclude "*.pyc" \
-            --exclude "*.pyo" \
-            "${src}/" "${dst}/"
-    else
-        cp -a "${src}/." "${dst}/"
-        rm -f "${dst}/deploy.sh"
-        find "$dst" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
-        find "$dst" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete 2>/dev/null || true
-    fi
-}
-
 read_env_key() {
     local file="$1"
     local key="$2"
@@ -96,18 +54,16 @@ upsert_env_key() {
     fi
 }
 
-sync_template_keys_from_env() {
-    local template="$1"
-    local env_file="$2"
-    [ -f "$template" ] || return 0
-    [ -f "$env_file" ] || return 0
-    while IFS='=' read -r key value; do
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if ! grep -q "^${key}=" "$template"; then
-            echo "${key}=${value}" >> "$template"
-            log "模板追加新字段: ${key}"
-        fi
-    done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$env_file")
+has_real_env_value() {
+    local value="${1:-}"
+    case "$value" in
+        ""|"your-token-here"|"your-chat-id")
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
 }
 
 service_container_id() {
@@ -170,8 +126,22 @@ build_security_bot_image() {
     log "镜像构建完成: ${IMAGE_NAME}"
 }
 
+install_helper_script() {
+    local src="$1"
+    local dst="$2"
+
+    if [ ! -f "${src}" ]; then
+        error "缺少脚本: ${src}"
+        exit 1
+    fi
+
+    cp -f "${src}" "${dst}"
+    chmod +x "${dst}"
+}
+
 clean_runtime_code() {
     rm -rf \
+        "${BASE_DIR}/scripts" \
         "${BASE_DIR}/tg-bot" \
         "${BASE_DIR}/.git" \
         "${BASE_DIR}/README.md" \
@@ -190,7 +160,7 @@ fi
 # ══════════════════════════════════════════════════════════════
 step "1/6 创建目录结构"
 
-mkdir -p "${BASE_DIR}"/{ban,state,scripts}
+mkdir -p "${BASE_DIR}"/{ban,state}
 cd "$BASE_DIR"
 log "工作目录: $BASE_DIR"
 
@@ -218,12 +188,18 @@ if [ -n "$(read_env_key "$ENV_FILE" "ALERT_BAN_THRESHOLD")" ] && [ "$(read_env_k
     upsert_env_key "$ENV_FILE" "ALERT_BAN_PER_MINUTE" "$(read_env_key "$ENV_FILE" "ALERT_BAN_THRESHOLD")"
 fi
 
-sync_template_keys_from_env "$ENV_TEMPLATE" "$ENV_FILE"
-
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-log "当前 Token: ${SEC_TG_BOT_TOKEN:-(未配置)}"
-log "当前 Chat ID: ${SEC_TG_CHAT_ID:-(未配置)}"
+SEC_TG_BOT_TOKEN_VAL="$(read_env_key "$ENV_FILE" "SEC_TG_BOT_TOKEN")"
+SEC_TG_CHAT_ID_VAL="$(read_env_key "$ENV_FILE" "SEC_TG_CHAT_ID")"
+if has_real_env_value "$SEC_TG_BOT_TOKEN_VAL"; then
+    log "SEC_TG_BOT_TOKEN: 已配置"
+else
+    log "SEC_TG_BOT_TOKEN: 未配置"
+fi
+if has_real_env_value "$SEC_TG_CHAT_ID_VAL"; then
+    log "SEC_TG_CHAT_ID: 已配置"
+else
+    log "SEC_TG_CHAT_ID: 未配置"
+fi
 
 # ══════════════════════════════════════════════════════════════
 # 3. 部署文件
@@ -234,32 +210,32 @@ build_security_bot_image
 
 if [ "$PROJECT_DIR" != "$BASE_DIR" ]; then
     cp -f "${PROJECT_DIR}/docker-compose.yml" "${BASE_DIR}/"
-    sync_runtime_scripts
-    log "运行文件已同步到 ${BASE_DIR} (docker-compose.yml, scripts/)"
+    log "运行文件已同步到 ${BASE_DIR} (docker-compose.yml)"
 fi
 
 clean_runtime_code
-log "配置文件部署完成"
+log "配置与编排文件部署完成"
 
 # ══════════════════════════════════════════════════════════════
 # 4. 安装安全加固脚本
 # ══════════════════════════════════════════════════════════════
 step "4/6 安装安全加固脚本"
 
-if [ -f "${BASE_DIR}/scripts/security-harden.sh" ]; then
-    cp -f "${BASE_DIR}/scripts/security-harden.sh" /usr/local/bin/security-harden
-    chmod +x /usr/local/bin/security-harden
+if [ -f "${PROJECT_DIR}/scripts/security-harden.sh" ]; then
+    install_helper_script "${PROJECT_DIR}/scripts/security-harden.sh" /usr/local/bin/security-harden
     log "'security-harden' 已安装到 /usr/local/bin/"
 fi
 
 # Fail2Ban 脚本
 for script in Fail2ban.sh nginx-ban.sh; do
-    if [ -f "${BASE_DIR}/scripts/${script}" ]; then
-        cp -f "${BASE_DIR}/scripts/${script}" "/usr/local/bin/${script%.sh}"
-        chmod +x "/usr/local/bin/${script%.sh}"
+    if [ -f "${PROJECT_DIR}/scripts/${script}" ]; then
+        install_helper_script "${PROJECT_DIR}/scripts/${script}" "/usr/local/bin/${script%.sh}"
         log "'${script%.sh}' 已安装"
     fi
 done
+
+install_helper_script "${PROJECT_DIR}/scripts/compose-healthcheck.sh" /usr/local/bin/security-guard-compose-healthcheck
+log "'security-guard-compose-healthcheck' 已安装"
 
 # ══════════════════════════════════════════════════════════════
 # 5. 安装 sg 管理工具
@@ -516,6 +492,7 @@ log "'sg' 管理工具已安装"
 step "6/6 启动服务"
 
 # 安全加固
+RUN_HARDEN_ON_DEPLOY="$(read_env_key "$ENV_FILE" "RUN_HARDEN_ON_DEPLOY")"
 RUN_HARDEN_ON_DEPLOY="${RUN_HARDEN_ON_DEPLOY:-false}"
 if [[ "${RUN_HARDEN_ON_DEPLOY,,}" =~ ^(1|y|yes|true)$ ]]; then
     security-harden install
@@ -524,9 +501,8 @@ else
 fi
 
 # 启动 TG Bot
-source "$ENV_FILE" 2>/dev/null || true
-
-if [ -z "${SEC_TG_BOT_TOKEN:-}" ]; then
+SEC_TG_BOT_TOKEN_VAL="$(read_env_key "$ENV_FILE" "SEC_TG_BOT_TOKEN")"
+if ! has_real_env_value "$SEC_TG_BOT_TOKEN_VAL"; then
     warn "未配置 SEC_TG_BOT_TOKEN"
     warn "请编辑 ${BASE_DIR}/.env 填入 Token 后运行: sg start"
 else
@@ -538,8 +514,8 @@ else
     fi
 fi
 
-if [ -x "${BASE_DIR}/scripts/install-autostart-healthcheck.sh" ]; then
-    "${BASE_DIR}/scripts/install-autostart-healthcheck.sh" || warn "安装开机自启与健康检查失败，可手动执行: ${BASE_DIR}/scripts/install-autostart-healthcheck.sh"
+if [ -x "${PROJECT_DIR}/scripts/install-autostart-healthcheck.sh" ]; then
+    "${PROJECT_DIR}/scripts/install-autostart-healthcheck.sh" || warn "安装开机自启与健康检查失败，可手动执行: ${PROJECT_DIR}/scripts/install-autostart-healthcheck.sh"
 else
     warn "未找到开机自启安装脚本，跳过"
 fi
